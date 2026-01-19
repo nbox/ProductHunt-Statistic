@@ -1,0 +1,53 @@
+name: Update Product Hunt catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub cron runs in UTC.
+    # Approx times for Europe/Helsinki (winter):
+    # 00:05 local -> 22:05 UTC (previous day)
+    # 12:00 local -> 10:00 UTC
+    # 23:50 local -> 21:50 UTC (about 10 minutes before midnight local)
+    - cron: "5 22 * * *"
+    - cron: "0 10 * * *"
+    - cron: "50 21 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Update daily report + README
+        env:
+          PRODUCTHUNT_TOKEN: ${{ secrets.PRODUCTHUNT_TOKEN }}
+          PH_TZ: "Europe/Helsinki"
+          TOP_N: "10"
+        run: |
+          python3 scripts/update_catalog.py
+
+      - name: Commit & push (if changed)
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+          git add */*/*.md
+
+          git commit -m "chore: update Product Hunt daily stats"
+          git push
