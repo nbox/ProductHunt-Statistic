@@ -3,14 +3,19 @@ name: Update Product Hunt catalog
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron runs in UTC.
-    # Approx times for Europe/Helsinki (winter):
-    # 00:05 local -> 22:05 UTC (previous day)
-    # 12:00 local -> 10:00 UTC
-    # 23:50 local -> 21:50 UTC (about 10 minutes before midnight local)
-    - cron: "5 22 * * *"
-    - cron: "0 10 * * *"
-    - cron: "50 21 * * *"
+    # GitHub cron runs in UTC. 
+    # LA 00:05  -> 08:05 UTC (winter), 07:05 UTC (summer)
+    - cron: "5 7 * * *"
+    - cron: "5 8 * * *"
+  
+    # LA 12:00  -> 20:00 UTC (winter), 19:00 UTC (summer)
+    - cron: "0 19 * * *"
+    - cron: "0 20 * * *"
+  
+    # LA 23:50  -> 07:50 UTC (winter), 06:50 UTC (summer)
+    - cron: "50 6 * * *"
+    - cron: "50 7 * * *"
+
 
 permissions:
   contents: write
