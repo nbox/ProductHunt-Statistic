@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -11,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.request import Request, urlopen
 
-
 PH_ENDPOINT = "https://api.producthunt.com/v2/api/graphql"
 
 README_PATH = "README.md"
@@ -21,7 +19,6 @@ END_TODAY = "<!-- END:PH_TODAY -->"
 
 START_ARCHIVE = "<!-- START:ARCHIVE -->"
 END_ARCHIVE = "<!-- END:ARCHIVE -->"
-
 
 QUERY_POSTS = r"""
 query Posts($first: Int, $after: String, $postedAfter: DateTime, $postedBefore: DateTime) {
@@ -83,7 +80,7 @@ def get_target_day(tz_name: str) -> tuple[datetime, datetime, str, str, str]:
     """
     Returns:
     - start_local, end_local: day boundaries in local timezone
-    - label_dd_mm_yyyy: for filenames and headers (DD-MM-YYYY)
+    - label_dd_mm_yyyy: filename/header label (DD-MM-YYYY)
     - year, month: directory names
     """
     tz = ZoneInfo(tz_name)
@@ -141,11 +138,10 @@ class DailyStats:
     avg_votes: float
     median_votes: float
     unique_makers: int
-    top_by_votes: list[dict]
     prolific_maker: str
 
 
-def compute_daily_stats(posts: list[dict], top_n: int = 10) -> DailyStats:
+def compute_daily_stats(posts: list[dict]) -> DailyStats:
     votes = [int(p.get("votesCount") or 0) for p in posts]
     votes_sorted = sorted(votes)
     count = len(posts)
@@ -177,24 +173,20 @@ def compute_daily_stats(posts: list[dict], top_n: int = 10) -> DailyStats:
         key = max(maker_key_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
         prolific = f"{key} ({maker_key_counts[key]} launches)"
 
-    top = sorted(posts, key=lambda p: int(p.get("votesCount") or 0), reverse=True)[:top_n]
-
     return DailyStats(
         count=count,
         total_votes=total,
         avg_votes=avg,
         median_votes=median,
         unique_makers=len(maker_unique_set),
-        top_by_votes=top,
         prolific_maker=prolific,
     )
 
 
 def format_makers_cell(makers: list[dict]) -> str:
     """
-    Show Maker *name* as the link label.
-    If name is missing, fallback to @username.
-    Link uses makers.url, fallback to https://www.producthunt.com/@username
+    Show Maker name as the link label; fallback to @username.
+    Link: makers.url; fallback: https://www.producthunt.com/@username
     """
     if not makers:
         return "—"
@@ -209,8 +201,6 @@ def format_makers_cell(makers: list[dict]) -> str:
             url = f"https://www.producthunt.com/@{username}"
 
         label = name or (f"@{username}" if username else "maker")
-
-        # Optional: show both name and @username
         if name and username:
             label = f"{name} (@{username})"
 
@@ -261,11 +251,11 @@ def build_daily_report_md(
     summary.append(f"- Report file: {safe_link(label_dd_mm_yyyy, rel_link_to_today)}")
     summary.append("\n")
 
-    top_block = []
-    top_block.append("## Launches (sorted by votes)\n")
-    top_block.append(render_posts_table(posts))
+    launches = []
+    launches.append("## Launches (sorted by votes)\n")
+    launches.append(render_posts_table(posts))
 
-    return header + sub + "\n".join(summary) + "\n" + "\n".join(top_block)
+    return header + sub + "\n".join(summary) + "\n" + "\n".join(launches)
 
 
 def ensure_dir(path: str) -> None:
@@ -375,12 +365,17 @@ def main() -> int:
         return 2
 
     tz_name = (os.getenv("PH_TZ") or "Europe/Helsinki").strip() or "Europe/Helsinki"
-    top_n = int((os.getenv("TOP_N") or "10").strip() or "10")
 
     start_local, end_local, label, year, month = get_target_day(tz_name)
 
     posts = fetch_posts_for_day(token, start_local, end_local)
-    stats = compute_daily_stats(posts, top_n=top_n)
+
+    # ✅ If there are no launches yet, do not touch files at all
+    if not posts:
+        print("No launches found for today. Skipping all updates.")
+        return 0
+
+    stats = compute_daily_stats(posts)
 
     daily_filename = f"{label}.md"
     daily_path = os.path.join(year, month, daily_filename)
