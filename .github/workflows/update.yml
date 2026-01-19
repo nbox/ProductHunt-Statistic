@@ -30,7 +30,7 @@ jobs:
       - name: Update daily report + README
         env:
           PRODUCTHUNT_TOKEN: ${{ secrets.PRODUCTHUNT_TOKEN }}
-          PH_TZ: "Europe/Helsinki"
+          PH_TZ: "America/Los_Angeles"
           TOP_N: "10"
         run: |
           python3 scripts/update_catalog.py
