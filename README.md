@@ -12,13 +12,35 @@ This repository automatically:
 ## Archive
 
 <!-- START:ARCHIVE -->
-_No reports yet._
+<details>
+<summary>2026</summary>
+
+  <details>
+  <summary>01</summary>
+
+  - [20-01-2026](2026/01/20-01-2026.md)
+
+  </details>
+
+</details>
+
 <!-- END:ARCHIVE -->
 
 ## Today
 
 <!-- START:PH_TODAY -->
-_No data yet. 
+### 20-01-2026 (Europe/Helsinki)
+
+- Launches: **0**
+- Total votes: **0**
+- Avg / Median votes: **0.00 / 0.00**
+- Unique makers: **0**
+- Most prolific maker: **—**
+- Full report: [20-01-2026](<2026/01/20-01-2026.md>)
+
+| # | App | Tagline | Maker(s) | Votes |
+|---:|---|---|---|---:|
+
 <!-- END:PH_TODAY -->
 
 
