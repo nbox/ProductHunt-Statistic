@@ -1,6 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Product Hunt daily catalog updater.
+
+What it does:
+- Fetches launches for "today" via Product Hunt GraphQL.
+- Writes/updates a daily report file: YYYY/MM/DD-MM-YYYY.md
+- Updates README.md blocks:
+  - Today section: summary + full table (no TOP_N limit)
+  - Archive navigation: expandable by year and month
+
+Important behavior:
+- If there are **0 launches** for the selected day, the script does **nothing** (no file updates).
+
+Env vars:
+- PRODUCTHUNT_TOKEN (required)
+- PH_TZ (default: America/Los_Angeles)
+- DATE (optional override): YYYY-MM-DD – force a specific day in PH_TZ
+"""
+
+from __future__ import annotations
+
+import html
 import json
 import os
 import re
@@ -10,8 +32,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.request import Request, urlopen
 
-PH_ENDPOINT = "https://api.producthunt.com/v2/api/graphql"
 
+PH_ENDPOINT = "https://api.producthunt.com/v2/api/graphql"
 README_PATH = "README.md"
 
 START_TODAY = "<!-- START:PH_TODAY -->"
@@ -20,17 +42,22 @@ END_TODAY = "<!-- END:PH_TODAY -->"
 START_ARCHIVE = "<!-- START:ARCHIVE -->"
 END_ARCHIVE = "<!-- END:ARCHIVE -->"
 
+
 QUERY_POSTS = r"""
 query Posts($first: Int, $after: String, $postedAfter: DateTime, $postedBefore: DateTime) {
   posts(first: $first, after: $after, postedAfter: $postedAfter, postedBefore: $postedBefore) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
+        id
+        slug
         name
         tagline
+        description
         url
+        website
         votesCount
-        makers { name username url }
+        commentsCount
       }
     }
   }
@@ -42,16 +69,58 @@ def iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def md_escape(s: str) -> str:
+def md_escape_text(s: str) -> str:
+    # Escape for Markdown tables (NOT HTML).
     return (s or "").replace("\n", " ").replace("|", "\\|").strip()
 
 
 def safe_link(label: str, url: str) -> str:
-    label = md_escape(label)
+    label = md_escape_text(label)
     url = (url or "").strip()
     if not url:
         return label
     return f"[{label}](<{url}>)"
+
+
+def html_compact(s: str) -> str:
+    # Escape for HTML-in-Markdown, keep newlines as <br>
+    s = (s or "").strip()
+    if not s:
+        return ""
+    s = html.escape(s)
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    return s.replace("\n", "<br>")
+
+
+def website_icon_link(website: str) -> str:
+    w = (website or "").strip()
+    if not w:
+        return "—"
+    # icon-only link (no full URL text)
+    return f"[🔗](<{w}>)"
+
+
+def build_description_cell(tagline: str, description: str) -> str:
+    short = html_compact(tagline)
+    full = html_compact(description)
+
+    if not short and not full:
+        return "—"
+
+    if not short and full:
+        # Fallback: short line from description
+        short = full
+        if len(short) > 180:
+            short = short[:177].rstrip() + "…"
+
+    if not full:
+        return short
+
+    return (
+        f"{short}<br>"
+        f"<details><summary><strong>Full description</strong></summary><br>"
+        f"{full}<br></details>"
+    )
 
 
 def ph_call(token: str, query: str, variables: dict) -> dict:
@@ -66,23 +135,14 @@ def ph_call(token: str, query: str, variables: dict) -> dict:
         },
         method="POST",
     )
-
     raw = urlopen(req, timeout=45).read().decode("utf-8")
     out = json.loads(raw)
-
     if out.get("errors"):
         raise RuntimeError(json.dumps(out["errors"], ensure_ascii=False))
-
     return out.get("data") or {}
 
 
 def get_target_day(tz_name: str) -> tuple[datetime, datetime, str, str, str]:
-    """
-    Returns:
-    - start_local, end_local: day boundaries in local timezone
-    - label_dd_mm_yyyy: filename/header label (DD-MM-YYYY)
-    - year, month: directory names
-    """
     tz = ZoneInfo(tz_name)
 
     override = (os.getenv("DATE") or "").strip()
@@ -107,7 +167,7 @@ def fetch_posts_for_day(token: str, start_local: datetime, end_local: datetime) 
 
     while True:
         vars_ = {
-            "first": 20,
+            "first": 50,
             "after": after,
             "postedAfter": iso_z(start_local),
             "postedBefore": iso_z(end_local),
@@ -133,129 +193,74 @@ def fetch_posts_for_day(token: str, start_local: datetime, end_local: datetime) 
 
 @dataclass
 class DailyStats:
-    count: int
+    launches: int
     total_votes: int
     avg_votes: float
     median_votes: float
-    unique_makers: int
-    prolific_maker: str
+    total_comments: int
+    avg_comments: float
+    median_comments: float
 
 
 def compute_daily_stats(posts: list[dict]) -> DailyStats:
     votes = [int(p.get("votesCount") or 0) for p in posts]
+    comments = [int(p.get("commentsCount") or 0) for p in posts]
+    n = len(posts)
+
     votes_sorted = sorted(votes)
-    count = len(posts)
-    total = sum(votes)
+    comments_sorted = sorted(comments)
 
-    avg = (total / count) if count else 0.0
+    total_votes = sum(votes)
+    total_comments = sum(comments)
 
-    if count == 0:
-        median = 0.0
-    elif count % 2 == 1:
-        median = float(votes_sorted[count // 2])
+    avg_votes = (total_votes / n) if n else 0.0
+    avg_comments = (total_comments / n) if n else 0.0
+
+    if n == 0:
+        median_votes = 0.0
+        median_comments = 0.0
+    elif n % 2 == 1:
+        median_votes = float(votes_sorted[n // 2])
+        median_comments = float(comments_sorted[n // 2])
     else:
-        median = (votes_sorted[count // 2 - 1] + votes_sorted[count // 2]) / 2.0
-
-    maker_key_counts: dict[str, int] = {}
-    maker_unique_set: set[str] = set()
-
-    for p in posts:
-        for m in (p.get("makers") or []):
-            username = (m.get("username") or "").strip()
-            name = (m.get("name") or "").strip()
-            key = username or name
-            if key:
-                maker_unique_set.add(key)
-                maker_key_counts[key] = maker_key_counts.get(key, 0) + 1
-
-    prolific = "—"
-    if maker_key_counts:
-        key = max(maker_key_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
-        prolific = f"{key} ({maker_key_counts[key]} launches)"
+        median_votes = (votes_sorted[n // 2 - 1] + votes_sorted[n // 2]) / 2.0
+        median_comments = (comments_sorted[n // 2 - 1] + comments_sorted[n // 2]) / 2.0
 
     return DailyStats(
-        count=count,
-        total_votes=total,
-        avg_votes=avg,
-        median_votes=median,
-        unique_makers=len(maker_unique_set),
-        prolific_maker=prolific,
+        launches=n,
+        total_votes=total_votes,
+        avg_votes=avg_votes,
+        median_votes=median_votes,
+        total_comments=total_comments,
+        avg_comments=avg_comments,
+        median_comments=median_comments,
     )
 
 
-def format_makers_cell(makers: list[dict]) -> str:
-    """
-    Show Maker name as the link label; fallback to @username.
-    Link: makers.url; fallback: https://www.producthunt.com/@username
-    """
-    if not makers:
-        return "—"
-
-    out = []
-    for m in makers:
-        username = (m.get("username") or "").strip()
-        name = md_escape(m.get("name") or "")
-        url = (m.get("url") or "").strip()
-
-        if not url and username:
-            url = f"https://www.producthunt.com/@{username}"
-
-        label = name or (f"@{username}" if username else "maker")
-        if name and username:
-            label = f"{name} (@{username})"
-
-        out.append(safe_link(label, url))
-
-    return ", ".join(out)
-
-
 def render_posts_table(posts: list[dict]) -> str:
-    lines = []
-    lines.append("| # | App | Tagline | Maker(s) | Votes |")
-    lines.append("|---:|---|---|---|---:|")
+    lines: list[str] = []
+    lines.append("| # | App | Description | Votes | Comments | Website |")
+    lines.append("|---:|---|---|---:|---:|---|")
 
     posts_sorted = sorted(posts, key=lambda p: int(p.get("votesCount") or 0), reverse=True)
 
     for i, p in enumerate(posts_sorted, 1):
-        name = md_escape(p.get("name") or "")
-        tagline = md_escape(p.get("tagline") or "")
-        url = (p.get("url") or "").strip()
+        name = md_escape_text(p.get("name") or "")
+        ph_url = (p.get("url") or "").strip()
+        app_cell = safe_link(name, ph_url) if ph_url else name
+
+        desc_cell = build_description_cell(p.get("tagline") or "", p.get("description") or "")
+
         votes = int(p.get("votesCount") or 0)
+        comments = int(p.get("commentsCount") or 0)
 
-        makers_cell = format_makers_cell(p.get("makers") or [])
-        app_cell = safe_link(name, url) if url else name
+        website_cell = website_icon_link(p.get("website") or "")
 
-        lines.append(f"| {i} | {app_cell} | {tagline} | {makers_cell} | {votes} |")
+        lines.append(
+            f"| {i} | {app_cell} | {desc_cell} | {votes} | {comments} | {website_cell} |"
+        )
 
     return "\n".join(lines) + "\n"
-
-
-def build_daily_report_md(
-    tz_name: str,
-    label_dd_mm_yyyy: str,
-    stats: DailyStats,
-    posts: list[dict],
-    rel_link_to_today: str,
-) -> str:
-    header = f"# Product Hunt — launches for {label_dd_mm_yyyy}\n"
-    sub = f"_Timezone for “today”: `{tz_name}`. Source: Product Hunt API._\n\n"
-
-    summary = []
-    summary.append("## Summary\n")
-    summary.append(f"- Launches: **{stats.count}**")
-    summary.append(f"- Total votes: **{stats.total_votes}**")
-    summary.append(f"- Avg votes: **{stats.avg_votes:.2f}**")
-    summary.append(f"- Median votes: **{stats.median_votes:.2f}**")
-    summary.append(f"- Unique makers: **{stats.unique_makers}**")
-    summary.append(f"- Most prolific maker: **{md_escape(stats.prolific_maker)}**")
-    summary.append(f"- Report file: {safe_link(label_dd_mm_yyyy, rel_link_to_today)}")
-    summary.append("\n")
-
-    launches = []
-    launches.append("## Launches (sorted by votes)\n")
-    launches.append(render_posts_table(posts))
-
-    return header + sub + "\n".join(summary) + "\n" + "\n".join(launches)
 
 
 def ensure_dir(path: str) -> None:
@@ -277,10 +282,7 @@ def replace_block(text: str, start: str, end: str, new_block: str) -> str:
 
 
 def scan_archive_nav() -> str:
-    """
-    Build <details> navigation over YYYY/MM/*.md
-    """
-    years = []
+    years: list[str] = []
     for entry in os.listdir("."):
         if entry.isdigit() and len(entry) == 4 and os.path.isdir(entry):
             years.append(entry)
@@ -289,9 +291,9 @@ def scan_archive_nav() -> str:
     if not years:
         return "_No reports yet._"
 
-    lines = []
+    lines: list[str] = []
     for y in years:
-        months = []
+        months: list[str] = []
         for m in os.listdir(y):
             if m.isdigit() and len(m) == 2 and os.path.isdir(os.path.join(y, m)):
                 months.append(m)
@@ -299,11 +301,6 @@ def scan_archive_nav() -> str:
 
         lines.append("<details>")
         lines.append(f"<summary>{y}</summary>\n")
-
-        if not months:
-            lines.append("_Empty_\n")
-            lines.append("</details>\n")
-            continue
 
         for m in months:
             month_dir = os.path.join(y, m)
@@ -339,6 +336,33 @@ def scan_archive_nav() -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_daily_report_md(
+    tz_name: str,
+    label_dd_mm_yyyy: str,
+    stats: DailyStats,
+    posts: list[dict],
+    rel_link_to_today: str,
+) -> str:
+    header = f"# Product Hunt — launches for {label_dd_mm_yyyy}\n"
+    sub = f"_Timezone for “today”: `{tz_name}`. Source: Product Hunt API._\n\n"
+
+    summary = []
+    summary.append("## Summary\n")
+    summary.append(f"- Launches: **{stats.launches}**")
+    summary.append(f"- Total votes: **{stats.total_votes}**")
+    summary.append(f"- Avg / Median votes: **{stats.avg_votes:.2f} / {stats.median_votes:.2f}**")
+    summary.append(f"- Total comments: **{stats.total_comments}**")
+    summary.append(f"- Avg / Median comments: **{stats.avg_comments:.2f} / {stats.median_comments:.2f}**")
+    summary.append(f"- Report file: {safe_link(label_dd_mm_yyyy, rel_link_to_today)}")
+    summary.append("\n")
+
+    launches = []
+    launches.append("## Launches (sorted by votes)\n")
+    launches.append(render_posts_table(posts))
+
+    return header + sub + "\n".join(summary) + "\n" + "\n".join(launches)
+
+
 def build_today_readme_block(
     tz_name: str,
     label_dd_mm_yyyy: str,
@@ -346,13 +370,13 @@ def build_today_readme_block(
     posts: list[dict],
     rel_link_to_today: str,
 ) -> str:
-    lines = []
+    lines: list[str] = []
     lines.append(f"### {label_dd_mm_yyyy} ({tz_name})\n")
-    lines.append(f"- Launches: **{stats.count}**")
+    lines.append(f"- Launches: **{stats.launches}**")
     lines.append(f"- Total votes: **{stats.total_votes}**")
     lines.append(f"- Avg / Median votes: **{stats.avg_votes:.2f} / {stats.median_votes:.2f}**")
-    lines.append(f"- Unique makers: **{stats.unique_makers}**")
-    lines.append(f"- Most prolific maker: **{md_escape(stats.prolific_maker)}**")
+    lines.append(f"- Total comments: **{stats.total_comments}**")
+    lines.append(f"- Avg / Median comments: **{stats.avg_comments:.2f} / {stats.median_comments:.2f}**")
     lines.append(f"- Full report: {safe_link(label_dd_mm_yyyy, rel_link_to_today)}\n")
     lines.append(render_posts_table(posts))
     return "\n".join(lines).rstrip() + "\n"
@@ -364,13 +388,13 @@ def main() -> int:
         print("Missing env PRODUCTHUNT_TOKEN", file=sys.stderr)
         return 2
 
-    tz_name = (os.getenv("PH_TZ") or "Europe/Helsinki").strip() or "Europe/Helsinki"
+    tz_name = (os.getenv("PH_TZ") or "America/Los_Angeles").strip() or "America/Los_Angeles"
 
     start_local, end_local, label, year, month = get_target_day(tz_name)
 
     posts = fetch_posts_for_day(token, start_local, end_local)
 
-    # ✅ If there are no launches yet, do not touch files at all
+    # If there are no launches yet, do not touch files at all.
     if not posts:
         print("No launches found for today. Skipping all updates.")
         return 0
@@ -405,7 +429,6 @@ def main() -> int:
         posts=posts,
         rel_link_to_today=rel_link_to_today,
     )
-
     archive_block = scan_archive_nav()
 
     readme = replace_block(readme, START_TODAY, END_TODAY, today_block)
