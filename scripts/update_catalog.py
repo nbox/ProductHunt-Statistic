@@ -345,6 +345,7 @@ def build_daily_report_md(
 ) -> str:
     header = f"# Product Hunt — launches for {label_dd_mm_yyyy}\n"
     sub = f"_Timezone for “today”: `{tz_name}`. Source: Product Hunt API._\n\n"
+    follow_me = "[![Follow me on Product Hunt](https://img.shields.io/badge/Product%20Hunt-@nbox-orange)](https://www.producthunt.com/@nbox)\n\n"
 
     summary = []
     summary.append("## Summary\n")
@@ -360,7 +361,8 @@ def build_daily_report_md(
     launches.append("## Launches (sorted by votes)\n")
     launches.append(render_posts_table(posts))
 
-    return header + sub + "\n".join(summary) + "\n" + "\n".join(launches)
+    return header + follow_me + "\n".join(summary) + "\n" + "\n".join(launches)
+
 
 
 def build_today_readme_block(
