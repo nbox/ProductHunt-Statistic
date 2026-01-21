@@ -345,7 +345,7 @@ def build_daily_report_md(
 ) -> str:
     header = f"# Product Hunt — launches for {label_dd_mm_yyyy}\n"
     sub = f"_Timezone for “today”: `{tz_name}`. Source: Product Hunt API._\n\n"
-    follow_me = "[![Follow me on Product Hunt](https://img.shields.io/badge/Product%20Hunt-@nbox-orange)](https://www.producthunt.com/@nbox)\n\n"
+    follow_me = "[![Follow me on Product Hunt](https://img.shields.io/badge/Follow%20me%20on%20Product%20Hunt-@nbox-orange?style=for-the-badge)](https://www.producthunt.com/@nbox)\n\n"
 
     summary = []
     summary.append("## Summary\n")
