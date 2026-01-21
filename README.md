@@ -2,7 +2,8 @@
 
 Auto-updated catalog of **[Product Hunt launches producthunt.com]([https://www.producthunt.com/](https://www.producthunt.com/leaderboard/daily/2026/1/21?ref=header_nav))** with simple **daily stats**.
 
-[![Follow me on Product Hunt](https://img.shields.io/badge/Product%20Hunt-@nbox-orange)](https://www.producthunt.com/@nbox)
+[![Follow me on Product Hunt](https://img.shields.io/badge/Follow%20me%20on%20Product%20Hunt-@nbox-orange?style=for-the-badge)](https://www.producthunt.com/@nbox)
+
 
 
 This repository automatically:
