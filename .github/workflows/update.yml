@@ -3,19 +3,24 @@ name: Update Product Hunt catalog
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron runs in UTC. 
-    # LA 00:05  -> 08:05 UTC (winter), 07:05 UTC (summer)
+    # GitHub cron runs in UTC.
+    # Default timezone used by the script: America/Los_Angeles
+    #
+    # Runs:
+    # - Start of PH day (00:05 LA)
+    # - Midday (12:00 LA)
+    # - 10 minutes before end of day (23:50 LA)
+    #
+    # Two entries each to cover DST shifts.
+    # 00:05 LA -> 08:05 UTC (winter), 07:05 UTC (summer)
     - cron: "5 7 * * *"
     - cron: "5 8 * * *"
-  
-    # LA 12:00  -> 20:00 UTC (winter), 19:00 UTC (summer)
+    # 12:00 LA -> 20:00 UTC (winter), 19:00 UTC (summer)
     - cron: "0 19 * * *"
     - cron: "0 20 * * *"
-  
-    # LA 23:50  -> 07:50 UTC (winter), 06:50 UTC (summer)
+    # 23:50 LA -> 07:50 UTC (winter), 06:50 UTC (summer)
     - cron: "50 6 * * *"
     - cron: "50 7 * * *"
-
 
 permissions:
   contents: write
@@ -36,7 +41,6 @@ jobs:
         env:
           PRODUCTHUNT_TOKEN: ${{ secrets.PRODUCTHUNT_TOKEN }}
           PH_TZ: "America/Los_Angeles"
-          TOP_N: "10"
         run: |
           python3 scripts/update_catalog.py
 
